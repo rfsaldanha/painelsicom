@@ -65,3 +65,6 @@ for(f in files_list){
   # Bind rows
   dados_sicom <- bind_rows(dados_sicom, tmp)
 }
+
+# Save parquet
+write_parquet(x = dados_sicom, sink = "dados_sicom.paquet")
