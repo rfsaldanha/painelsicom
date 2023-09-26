@@ -4,6 +4,7 @@ library(bslib)
 library(bsicons)
 library(arrow)
 library(dplyr)
+library(stringr)
 library(ggplot2)
 library(scales)
 
@@ -15,14 +16,19 @@ ui <- page_sidebar(
   title = "Painel SICOM",
   sidebar = sidebar(
     
-    selectInput( 
+    selectizeInput( 
       inputId = "meio", 
       label = "Meio",
       choices = NULL, 
       multiple = TRUE  
     ),
     
-    selectInput(
+    textInput(
+      inputId = "starts_with", 
+      label = "Nome começa com"
+    ),
+    
+    selectizeInput(
       inputId = "nome_veiculo", 
       label = "Nome do veículo",
       choices = NULL, 
@@ -30,7 +36,7 @@ ui <- page_sidebar(
     )
   ),
   layout_column_wrap(
-    width = 1/2, height = 200,
+    width = 1/2, height = 100, fill = FALSE,
     value_box(
       title = "Valor total",
       value = textOutput("vtotal"),
@@ -44,32 +50,52 @@ ui <- page_sidebar(
   ),
   card(
     card_header("Valor das ações"),
-    plotOutput("p_valor_acoes")
+    plotOutput("p_valor_acoes"), height = 300, fill = FALSE
   ),
   card(
     card_header("Quantidade de ações"),
-    plotOutput("p_qtd_acoes")
+    plotOutput("p_qtd_acoes"), height = 300, fill = FALSE
+  ),
+  card(
+    card_header("Dias de veiculação"),
+    plotOutput("p_dveic"), height = 300, fill = FALSE
   )
 )
 
 server <- function(input, output, session) {
   # Update choices
-  updateSelectInput(
+  updateSelectizeInput(
     session, "meio", 
-    choices = sort(unique(sicom$meio))
+    server = TRUE,
+    choices = sort(unique(sicom$meio)),
+    selected = sort(unique(sicom$meio))
+    
   )
   
   nomes <- reactive({
-    sicom %>%
-      filter(meio %in% input$meio) %>%
-      distinct(nome_do_veiculo) %>%
-      arrange(nome_do_veiculo) %>%
-      pull(nome_do_veiculo)
+    
+    if(input$starts_with == ""){
+      sicom %>%
+        filter(meio %in% input$meio) %>%
+        distinct(nome_do_veiculo) %>%
+        arrange(nome_do_veiculo) %>%
+        pull(nome_do_veiculo)
+    } else {
+      sicom %>%
+        filter(meio %in% input$meio) %>%
+        distinct(nome_do_veiculo) %>%
+        filter(str_starts(tolower(nome_do_veiculo), tolower(input$starts_with))) %>%
+        arrange(nome_do_veiculo) %>%
+        pull(nome_do_veiculo)
+    }
+    
+    
   })
   
   observe({
-    updateSelectInput(
+    updateSelectizeInput(
       session, "nome_veiculo",
+      server = TRUE,
       choices = nomes()
     )
   })
@@ -81,10 +107,10 @@ server <- function(input, output, session) {
     sicom %>%
       filter(nome_do_veiculo %in% !!input$nome_veiculo) %>%
       group_by(nome_do_veiculo, ano_acao) %>%
-      summarise(total = sum(valor_desembolso_anunciante_r, na.rm = TRUE)) %>%
+      summarise(total = sum(valor_desembolso_anunciante_r, na.rm = TRUE), .groups = "drop_last") %>%
       ungroup() %>%
       ggplot(aes(x = ano_acao, y = total, color = nome_do_veiculo)) +
-      geom_line() +
+      geom_line(lwd = .8) +
       scale_y_continuous(labels = dollar_format(prefix = "R$ ", big.mark = ".", decimal.mark = ",")) + 
       theme_bw() +
       labs(x = "Ano da ação", y = "Valor desembolsado", color = "Veículo") +
@@ -97,13 +123,28 @@ server <- function(input, output, session) {
     sicom %>%
       filter(nome_do_veiculo %in% !!input$nome_veiculo) %>%
       group_by(nome_do_veiculo, ano_acao) %>%
-      summarise(total = n()) %>%
+      summarise(total = n(), .groups = "drop_last") %>%
       ungroup() %>%
       ggplot(aes(x = ano_acao, y = total, color = nome_do_veiculo)) +
-      geom_line() +
+      geom_line(lwd = .8) +
       theme_bw() +
-      labs(x = "Ano da ação", y = "Valor desembolsado") +
       labs(x = "Ano da ação", y = "Valor desembolsado", color = "Veículo") +
+      theme(legend.position = "bottom", legend.direction = "horizontal")
+  })
+  
+  output$p_dveic <- renderPlot({
+    req(input$nome_veiculo)
+    
+    sicom %>%
+      filter(nome_do_veiculo %in% !!input$nome_veiculo) %>%
+      mutate(dias = as.numeric(data_termino_da_veiculacao - data_inicio_da_veiculacao)) %>%
+      group_by(nome_do_veiculo, ano_acao) %>%
+      summarise(total = sum(dias, na.rm = TRUE), .groups = "drop_last") %>%
+      ungroup() %>%
+      ggplot(aes(x = ano_acao, y = total, color = nome_do_veiculo)) +
+      geom_line(lwd = .8) +
+      theme_bw() +
+      labs(x = "Ano da ação", y = "Dias", color = "Veículo") +
       theme(legend.position = "bottom", legend.direction = "horizontal")
   })
   
@@ -112,7 +153,7 @@ server <- function(input, output, session) {
     
     sicom %>%
       filter(nome_do_veiculo %in% !!input$nome_veiculo) %>%
-      summarise(total = sum(valor_desembolso_anunciante_r, na.rm = TRUE)) %>%
+      summarise(total = sum(valor_desembolso_anunciante_r, na.rm = TRUE), .groups = "drop_last") %>%
       pull(total) %>%
       dollar(prefix = "R$ ", big.mark = ".", decimal.mark = ",")
   })
@@ -120,7 +161,7 @@ server <- function(input, output, session) {
   output$nacoes <- renderText({
     sicom %>%
       filter(nome_do_veiculo %in% !!input$nome_veiculo) %>%
-      summarise(total = n()) %>%
+      summarise(total = n(), .groups = "drop_last") %>%
       pull(total) %>%
       dollar(prefix = "", big.mark = ".", decimal.mark = ",")
   })
